@@ -1,42 +1,74 @@
-name: "Airport Checkin"
+name: "机场自动签到系统"
 
 on:
   schedule:
-    - cron: "0 22 * * *"  # scheduled at 06:00 (UTC+8) everyday
-  workflow_dispatch:
+    - cron: "0 22 * * *"  # 每天UTC时间22:00执行（北京时间06:00）
+  workflow_dispatch:       # 允许手动触发
 
 env:
   RUN_ENV: 'prod'
+  TZ: 'Asia/Shanghai'      # 强制设置北京时间
 
 jobs:
-  build:
+  automatic-checkin:
+    name: 自动签到任务
     runs-on: ubuntu-latest
-    # if: github.ref == 'refs/heads/master'
+    timeout-minutes: 15
+    permissions:
+      contents: read
 
     steps:
-      - name: Checkout master
-        uses: actions/checkout@v2
+      - name: 检出代码
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # ref: master
+          persist-credentials: false
 
-      - name: Set up python
-        uses: actions/setup-python@v2
+      - name: 配置Python环境
+        uses: actions/setup-python@v5
         with:
-          python-version: 3.10
+          python-version: "3.10.12"
+          cache: 'pip'
 
-      - name: Random sleep
+      - name: 智能延迟
         if: github.event_name == 'schedule'
-        run: sleep $(shuf -i 10-100 -n 1)
+        run: |
+          # 生成北京时间06:00-06:30之间的随机延迟
+          delay=$(shuf -i 0-1800 -n 1)
+          echo "随机延迟：${delay}秒"
+          sleep $delay
 
-      - name: Install dependencies
+      - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Run sign
+          pip install -r requirements.txt --no-cache-dir
+
+      - name: 执行核心签到
+        env:
+          SERVER_CHAN_KEY: ${{ secrets.SCKEY }}
+          USER_EMAIL: ${{ secrets.EMAIL }}
+          USER_PASSWORD: ${{ secrets.PASSWD }}
+          API_TOKEN: ${{ secrets.TOKEN }}  # 新增token支持
+        run: |
+          echo "===== 任务启动 [$(date '+%m-%d %H:%M:%S')] ====="
+          python3 -u ./main.py 2>&1 | tee -a checkin.log
+          exit_code=${PIPESTATUS[0]}
+          echo "===== 任务结束 [$(date '+%m-%d %H:%M:%S')] ====="
+          exit $exit_code
+
+      - name: 推送通知
+        if: always()
         env:
           SCKEY: ${{ secrets.SCKEY }}
-          EMAIL: ${{ secrets.EMAIL }}
-          PASSWD: ${{ secrets.PASSWD }}
         run: |
-          python3 ./main.py
+          status=${{ job.status }}
+          if [ "$status" = "success" ]; then
+            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=✅签到成功&descr=账户：${USER_EMAIL}"
+          else
+            log=$(sed 's/$/%0A/g' checkin.log | tr -d '\n')
+            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=❌签到失败&descr=账户：${USER_EMAIL}%0A错误日志：${log}"
+          fi
+
+      - name: 清理日志
+        if: always()
+        run: rm -f checkin.log
