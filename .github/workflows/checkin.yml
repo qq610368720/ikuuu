@@ -1,11 +1,51 @@
-name: "iKuuu 机场自动签到"
+name: "iKuuu 机场自动签到系统"
+
+on:
+  schedule:
+    - cron: "0 22 * * *"  # UTC时间22:00 (北京时间06:00)
+  workflow_dispatch:
+
+env:
+  TZ: Asia/Shanghai
+  PYTHONUNBUFFERED: 1
 
 jobs:
   checkin:
-    steps:
-      # ...其他步骤保持不变...
+    name: 🛫 自动签到任务
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
 
-      - name: 📢 推送状态通知
+    steps:
+      - name: ⬇️ 检出代码
+        uses: actions/checkout@v4
+
+      - name: 🐍 配置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: 📦 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt \
+            -i https://pypi.tuna.tsinghua.edu.cn/simple \
+            --trusted-host pypi.tuna.tsinghua.edu.cn \
+            --no-warn-script-location
+
+      - name: 🚀 执行签到任务
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWD: ${{ secrets.PASSWD }}
+        run: |
+          echo "===== 任务开始 [$(date '+%m-%d %H:%M:%S')] ====="
+          python3 -u main.py
+          echo "===== 任务结束 [$(date '+%m-%d %H:%M:%S')] ====="
+
+      - name: 📢 推送通知
         if: always()
         env:
           SCKEY: ${{ secrets.SCKEY }}
@@ -14,31 +54,41 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get -qq update && sudo apt-get -qq install -y jq
-          
+
+          # 状态处理
           status="${{ job.status }}"
           timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+          echo "当前状态: $status"
 
           # Server酱推送
           if [[ -n "$SCKEY" && "$SCKEY" != "1" ]]; then
-            encoded_title=$(jq -nr --arg status "$status" '签到\($status)|@uri')
-            encoded_descr=$(jq -nr --arg ts "$timestamp" '执行时间：\($ts)|@uri')
+            echo "→ 处理Server酱通知..."
+            api_url="https://sctapi.ftqq.com/$SCKEY.send"
             
-            curl -s -G "https://sctapi.ftqq.com/$SCKEY.send" \
-              --data-urlencode "title=$encoded_title" \
-              --data-urlencode "descr=$encoded_descr" \
-              --fail-with-body
+            title_encoded=$(jq -nr --arg s "$status" '签到\($s)|@uri')
+            desc_encoded=$(jq -nr --arg t "$timestamp" '执行时间：\($t)|@uri')
+
+            curl -s -G "$api_url" \
+              --data-urlencode "title=$title_encoded" \
+              --data-urlencode "descr=$desc_encoded" \
+              --fail-with-body || echo "Server酱推送失败"
           fi
 
           # PushPlus推送
           if [[ -n "$TOKEN" && "$TOKEN" != "1" ]]; then
-            json_data=$(jq -n \
-              --arg token "$TOKEN" \
-              --arg title "签到${status}" \
-              --arg content "执行时间：${timestamp}" \
-              '{token: $token, title: $title, content: $content}')
+            echo "→ 处理PushPlus通知..."
+            api_url="http://www.pushplus.plus/send"
             
-            curl -s -X POST "http://www.pushplus.plus/send" \
+            json_data=$(jq -n \
+              --arg t "$TOKEN" \
+              --arg s "$status" \
+              --arg d "$timestamp" \
+              '{token: $t, title: "签到\($s)", content: "执行时间：\($d)"}')
+
+            curl -s -X POST "$api_url" \
               -H "Content-Type: application/json" \
               -d "$json_data" \
-              --fail-with-body
+              --fail-with-body || echo "PushPlus推送失败"
           fi
+
+          echo "通知流程完成"
