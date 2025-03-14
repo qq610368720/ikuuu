@@ -1,74 +1,70 @@
-name: "机场自动签到系统"
+name: "iKuuu 机场自动签到"
 
 on:
   schedule:
-    - cron: "0 22 * * *"  # 每天UTC时间22:00执行（北京时间06:00）
-  workflow_dispatch:       # 允许手动触发
+    - cron: "0 22 * * *"  # UTC时间22:00 (北京时间06:00)
+  workflow_dispatch:
 
 env:
-  RUN_ENV: 'prod'
-  TZ: 'Asia/Shanghai'      # 强制设置北京时间
+  TZ: Asia/Shanghai
 
 jobs:
-  automatic-checkin:
-    name: 自动签到任务
+  checkin:
+    name: 🛫 自动签到
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
 
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
+      - name: 🔍 环境验证
+        run: |
+          echo "必要环境变量检查:"
+          echo "EMAIL exists: ${{ secrets.EMAIL != '' }}"
+          echo "PASSWD exists: ${{ secrets.PASSWD != '' }}"
+          echo "SCKEY exists: ${{ secrets.SCKEY != '' }}"
+          echo "TOKEN exists: ${{ secrets.TOKEN != '' }}"
 
-      - name: 配置Python环境
+      - name: ⬇️ 检出代码
+        uses: actions/checkout@v4
+
+      - name: 🐍 配置Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10.12"
-          cache: 'pip'
+          python-version: "3.10"
 
-      - name: 智能延迟
-        if: github.event_name == 'schedule'
-        run: |
-          # 生成北京时间06:00-06:30之间的随机延迟
-          delay=$(shuf -i 0-1800 -n 1)
-          echo "随机延迟：${delay}秒"
-          sleep $delay
+      - name: 📦 安装依赖
+        run: pip install requests
 
-      - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt --no-cache-dir
-
-      - name: 执行核心签到
+      - name: 🚀 执行核心任务
         env:
-          SERVER_CHAN_KEY: ${{ secrets.SCKEY }}
-          USER_EMAIL: ${{ secrets.EMAIL }}
-          USER_PASSWORD: ${{ secrets.PASSWD }}
-          API_TOKEN: ${{ secrets.TOKEN }}  # 新增token支持
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWD: ${{ secrets.PASSWD }}
+          SCKEY: ${{ secrets.SCKEY }}
+          TOKEN: ${{ secrets.TOKEN }}
         run: |
           echo "===== 任务启动 [$(date '+%m-%d %H:%M:%S')] ====="
-          python3 -u ./main.py 2>&1 | tee -a checkin.log
-          exit_code=${PIPESTATUS[0]}
+          python3 -u main.py || exit_code=$?
           echo "===== 任务结束 [$(date '+%m-%d %H:%M:%S')] ====="
-          exit $exit_code
+          exit ${exit_code:-0}
 
-      - name: 推送通知
+      - name: 📢 推送通知
         if: always()
         env:
           SCKEY: ${{ secrets.SCKEY }}
+          TOKEN: ${{ secrets.TOKEN }}
         run: |
-          status=${{ job.status }}
-          if [ "$status" = "success" ]; then
-            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=✅签到成功&descr=账户：${USER_EMAIL}"
-          else
-            log=$(sed 's/$/%0A/g' checkin.log | tr -d '\n')
-            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=❌签到失败&descr=账户：${USER_EMAIL}%0A错误日志：${log}"
+          status="${{ job.status }}"
+          timestamp=$(date '+%m-%d %H:%M:%S')
+          
+          # Server酱推送
+          if [ -n "$SCKEY" ]; then
+            curl -s "https://sctapi.ftqq.com/$SCKEY.send?title=签到${status}&descr=时间：$timestamp"
           fi
-
-      - name: 清理日志
-        if: always()
-        run: rm -f checkin.log
+          
+          # PushPlus推送
+          if [ -n "$TOKEN" ]; then
+            curl -s -X POST "http://www.pushplus.plus/send" \
+              -H "Content-Type: application/json" \
+              -d "{\"token\":\"$TOKEN\",\"title\":\"签到${status}\",\"content\":\"时间：$timestamp\"}"
+          fi
