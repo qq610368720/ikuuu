@@ -1,74 +1,125 @@
-name: "机场自动签到系统"
+name: "iKuuu 机场自动签到系统"
 
 on:
   schedule:
-    - cron: "0 22 * * *"  # 每天UTC时间22:00执行（北京时间06:00）
+    - cron: "0 22 * * *"  # 每天UTC时间22:00（北京时间06:00）
   workflow_dispatch:       # 允许手动触发
 
 env:
-  RUN_ENV: 'prod'
-  TZ: 'Asia/Shanghai'      # 强制设置北京时间
+  TZ: Asia/Shanghai       # 强制设置时区
+  PYTHONUNBUFFERED: 1     # 实时输出日志
 
 jobs:
   automatic-checkin:
-    name: 自动签到任务
+    name: 🛫 执行签到任务
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20    # 任务超时时间
     permissions:
-      contents: read
+      contents: read       # 最小权限原则
 
     steps:
-      - name: 检出代码
+      # ---------------------------
+      # 初始化阶段
+      # ---------------------------
+      - name: ⬇️ 检出代码库
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: 配置Python环境
+      # ---------------------------
+      # 环境配置阶段
+      # ---------------------------
+      - name: 🐍 配置 Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: "3.10.12"
-          cache: 'pip'
+          cache: 'pip'               # 启用依赖缓存
+          cache-dependency-path: 'requirements.txt'
 
-      - name: 智能延迟
+      # ---------------------------
+      # 准备阶段
+      # ---------------------------
+      - name: ⏳ 智能随机延迟
         if: github.event_name == 'schedule'
         run: |
-          # 生成北京时间06:00-06:30之间的随机延迟
-          delay=$(shuf -i 0-1800 -n 1)
+          # 生成北京时间06:00-07:00之间的随机延迟
+          delay=$(shuf -i 300-3600 -n 1)
           echo "随机延迟：${delay}秒"
           sleep $delay
 
-      - name: 安装依赖
+      - name: 📦 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates
+
+      - name: 🔧 安装Python依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt --no-cache-dir
+          pip install requests --no-cache-dir
 
-      - name: 执行核心签到
+      # ---------------------------
+      # 核心执行阶段
+      # ---------------------------
+      - name: 🚀 执行签到任务
         env:
-          SERVER_CHAN_KEY: ${{ secrets.SCKEY }}
-          USER_EMAIL: ${{ secrets.EMAIL }}
-          USER_PASSWORD: ${{ secrets.PASSWD }}
-          API_TOKEN: ${{ secrets.TOKEN }}  # 新增token支持
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWD: ${{ secrets.PASSWD }}
+          SCKEY: ${{ secrets.SCKEY }}
+          TOKEN: ${{ secrets.TOKEN }}
         run: |
           echo "===== 任务启动 [$(date '+%m-%d %H:%M:%S')] ====="
-          python3 -u ./main.py 2>&1 | tee -a checkin.log
+          python3 -u main.py 2>&1 | tee -a runtime.log
           exit_code=${PIPESTATUS[0]}
           echo "===== 任务结束 [$(date '+%m-%d %H:%M:%S')] ====="
           exit $exit_code
 
-      - name: 推送通知
+      # ---------------------------
+      # 后处理阶段
+      # ---------------------------
+      - name: 📤 上传执行日志
         if: always()
-        env:
+        uses: actions/upload-artifact@v3
+        with:
+          name: checkin-logs
+          path: |
+            runtime.log
+            main.log
+
+      - name: 🧹 清理临时文件
+        if: always()
+        run: rm -f runtime.log
+
+      # ---------------------------
+      # 通知阶段
+      # ---------------------------
+      - name: 📢 发送最终通知
+        if: always()
+        env: 
           SCKEY: ${{ secrets.SCKEY }}
+          TOKEN: ${{ secrets.TOKEN }}
         run: |
-          status=${{ job.status }}
+          # 解析任务状态
+          status="${{ job.status }}"
+          timestamp=$(date '+%m-%d %H:%M:%S')
+
+          # 构建通知内容
           if [ "$status" = "success" ]; then
-            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=✅签到成功&descr=账户：${USER_EMAIL}"
+            title="✅ 签到成功 - $timestamp"
+            status_msg="所有流程已完成"
           else
-            log=$(sed 's/$/%0A/g' checkin.log | tr -d '\n')
-            curl -s "https://sctapi.ftqq.com/${SCKEY}.send?title=❌签到失败&descr=账户：${USER_EMAIL}%0A错误日志：${log}"
+            title="❌ 签到失败 - $timestamp"
+            status_msg="执行过程中遇到错误"
           fi
 
-      - name: 清理日志
-        if: always()
-        run: rm -f checkin.log
+          # Server酱推送
+          if [ -n "$SCKEY" ] && [ "$SCKEY" != "1" ]; then
+            curl -s "https://sctapi.ftqq.com/$SCKEY.send?title=$title&descr=$status_msg%0A查看日志获取详细信息"
+          fi
+
+          # PushPlus推送
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "1" ]; then
+            curl -s -X POST "http://www.pushplus.plus/send" \
+              -H "Content-Type: application/json" \
+              -d "{\"token\":\"$TOKEN\",\"title\":\"$title\",\"content\":\"$status_msg\",\"template\":\"txt\"}"
+          fi
