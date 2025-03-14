@@ -1,109 +1,51 @@
-name: "iKuuu 机场自动签到系统"
+name: "iKuuu自动签到"
 
 on:
   schedule:
-    - cron: "0 22 * * *"  # UTC时间22:00 (北京时间06:00)
+    - cron: "0 22 * * *"  # UTC时间22:00（北京时间06:00）
   workflow_dispatch:
 
 env:
   TZ: Asia/Shanghai
-  PYTHONUNBUFFERED: 1
 
 jobs:
   checkin:
-    name: 🛫 自动签到任务
+    name: 🛫 执行签到任务
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
 
     steps:
-      - name: ⬇️ 检出代码库
+      - name: ⬇️ 检出代码
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: 🐍 配置Python环境
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
           cache: 'pip'
-          cache-dependency-path: 'requirements.txt'
 
       - name: 📦 安装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt \
-            -i https://pypi.tuna.tsinghua.edu.cn/simple \
-            --trusted-host pypi.tuna.tsinghua.edu.cn
+          pip install -r requirements.txt
 
-      - name: 🚀 执行签到任务
+      - name: 🚀 执行核心任务
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWD: ${{ secrets.PASSWD }}
+          SCKEY: ${{ secrets.SCKEY }}
+          TOKEN: ${{ secrets.TOKEN }}
         run: |
-          echo "===== 任务开始 [$(date '+%m-%d %H:%M:%S')] ====="
-          python3 -u main.py
+          echo "===== 任务启动 [$(date '+%m-%d %H:%M:%S')] ====="
+          python3 main.py
           echo "===== 任务结束 [$(date '+%m-%d %H:%M:%S')] ====="
 
-      - name: 📢 智能通知系统
-        if: always()
+      - name: 📢 错误通知
+        if: failure()
         env:
           SCKEY: ${{ secrets.SCKEY }}
           TOKEN: ${{ secrets.TOKEN }}
-        shell: bash
         run: |
-          # 初始化设置
-          set +e  # 禁用严格错误检查
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq
-
-          # 基础信息获取
-          status="${{ job.status }}"
-          timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-          counter_file=".sct_counter"
-
-          # Server酱通知逻辑
-          if [[ -n "$SCKEY" && "$SCKEY" != "1" ]]; then
-            # 读取计数器
-            today=$(date +%Y%m%d)
-            current_count=$(grep "^$today:" "$counter_file" 2>/dev/null | cut -d: -f2)
-            current_count=${current_count:-0}
-
-            if [ "$current_count" -lt 5 ]; then
-              echo "→ 发送Server酱通知（今日第$((current_count+1))次）"
-              
-              # 编码处理
-              title=$(jq -nr --arg s "$status" '"签到结果：" + $s' | jq -sRr @uri)
-              desc=$(jq -nr --arg t "$timestamp" '"执行时间：" + $t' | jq -sRr @uri)
-
-              # 发送请求并更新计数器
-              curl -s -G "https://sctapi.ftqq.com/$SCKEY.send" \
-                --data-urlencode "title=$title" \
-                --data-urlencode "descr=$desc" && \
-                echo "$today:$((current_count+1))" >> "$counter_file"
-            else
-              echo "→ Server酱已达今日5次限制，停止发送"
-            fi
-          fi
-
-          # PushPlus通知逻辑（始终发送）
-          if [[ -n "$TOKEN" && "$TOKEN" != "1" ]]; then
-            echo "→ 发送PushPlus通知"
-            
-            json_data=$(jq -n \
-              --arg t "$TOKEN" \
-              --arg s "$status" \
-              --arg d "$timestamp" \
-              '{
-                "token": $t,
-                "title": "签到通知",
-                "content": "状态：\($s)\n时间：\($d)\nServer酱剩余次数：\(5-'$current_count')"
-              }')
-
-            curl -s -X POST "http://www.pushplus.plus/send" \
-              -H "Content-Type: application/json" \
-              -d "$json_data"
-          fi
-
-          echo "通知流程完成"
+          echo "任务执行失败，请检查日志"
