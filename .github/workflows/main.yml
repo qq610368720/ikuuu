@@ -1,70 +1,44 @@
-name: "iKuuu 机场自动签到"
+- name: 📢 推送通知
+  if: always()
+  env:
+    SCKEY: ${{ secrets.SCKEY }}
+    TOKEN: ${{ secrets.TOKEN }}
+  shell: bash
+  run: |
+    # 安装必要工具（jq）
+    sudo apt-get -qq update && sudo apt-get -qq install jq
 
-on:
-  schedule:
-    - cron: "0 22 * * *"  # UTC时间22:00 (北京时间06:00)
-  workflow_dispatch:
+    # 获取任务状态
+    status="${{ job.status }}"
+    timestamp=$(date '+%m-%d %H:%M:%S')
 
-env:
-  TZ: Asia/Shanghai
+    # Server酱推送
+    if [[ -n "$SCKEY" && "$SCKEY" != "1" ]]; then
+      echo "→ 发送Server酱通知"
+      encoded_title="$(echo "签到${status}" | jq -Rr @uri)"
+      encoded_descr="$(echo "时间：${timestamp}" | jq -Rr @uri)"
+      
+      curl_response=$(curl -s -o /dev/null -w "%{http_code}" \
+        -G "https://sctapi.ftqq.com/$SCKEY.send" \
+        --data-urlencode "title=$encoded_title" \
+        --data-urlencode "descr=$encoded_descr")
+      
+      echo "Server酱返回状态码：$curl_response"
+    fi
 
-jobs:
-  checkin:
-    name: 🛫 自动签到
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
-    steps:
-      - name: 🔍 环境验证
-        run: |
-          echo "必要环境变量检查:"
-          echo "EMAIL exists: ${{ secrets.EMAIL != '' }}"
-          echo "PASSWD exists: ${{ secrets.PASSWD != '' }}"
-          echo "SCKEY exists: ${{ secrets.SCKEY != '' }}"
-          echo "TOKEN exists: ${{ secrets.TOKEN != '' }}"
-
-      - name: ⬇️ 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🐍 配置Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: 📦 安装依赖
-        run: pip install requests
-
-      - name: 🚀 执行核心任务
-        env:
-          EMAIL: ${{ secrets.EMAIL }}
-          PASSWD: ${{ secrets.PASSWD }}
-          SCKEY: ${{ secrets.SCKEY }}
-          TOKEN: ${{ secrets.TOKEN }}
-        run: |
-          echo "===== 任务启动 [$(date '+%m-%d %H:%M:%S')] ====="
-          python3 -u main.py || exit_code=$?
-          echo "===== 任务结束 [$(date '+%m-%d %H:%M:%S')] ====="
-          exit ${exit_code:-0}
-
-      - name: 📢 推送通知
-        if: always()
-        env:
-          SCKEY: ${{ secrets.SCKEY }}
-          TOKEN: ${{ secrets.TOKEN }}
-        run: |
-          status="${{ job.status }}"
-          timestamp=$(date '+%m-%d %H:%M:%S')
-          
-          # Server酱推送
-          if [ -n "$SCKEY" ]; then
-            curl -s "https://sctapi.ftqq.com/$SCKEY.send?title=签到${status}&descr=时间：$timestamp"
-          fi
-          
-          # PushPlus推送
-          if [ -n "$TOKEN" ]; then
-            curl -s -X POST "http://www.pushplus.plus/send" \
-              -H "Content-Type: application/json" \
-              -d "{\"token\":\"$TOKEN\",\"title\":\"签到${status}\",\"content\":\"时间：$timestamp\"}"
-          fi
+    # PushPlus推送
+    if [[ -n "$TOKEN" && "$TOKEN" != "1" ]]; then
+      echo "→ 发送PushPlus通知"
+      json_payload=$(jq -n \
+        --arg token "$TOKEN" \
+        --arg title "签到${status}" \
+        --arg content "时间：${timestamp}" \
+        '{token: $token, title: $title, content: $content}')
+      
+      curl_response=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "http://www.pushplus.plus/send" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload")
+      
+      echo "PushPlus返回状态码：$curl_response"
+    fi
