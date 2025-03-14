@@ -1,5 +1,5 @@
-# 强制指定版本
 requests==2.31.0
-urllib3==2.0.7  # requests的依赖项
-charset-normalizer==3.3.2  # 字符编码处理
-certifi==2023.11.17  # SSL证书
+urllib3==2.0.7
+requests-toolbelt==1.0.0  # 必需的表单提交库
+certifi==2023.11.17
+charset-normalizer==3.3.2
