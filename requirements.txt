@@ -1,5 +1,4 @@
 requests==2.31.0
 urllib3==2.0.7
-requests-toolbelt==1.0.0  # 必需的表单提交库
+requests-toolbelt==1.0.0
 certifi==2023.11.17
-charset-normalizer==3.3.2
