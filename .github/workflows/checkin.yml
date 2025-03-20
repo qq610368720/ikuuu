@@ -42,10 +42,27 @@ jobs:
           python3 main.py
           echo "===== 任务结束 [$(date '+%m-%d %H:%M:%S')] ====="
 
-      - name: 📢 错误通知
-        if: failure()
+      - name: 📢 发送通用执行结果通知
         env:
           SCKEY: ${{ secrets.SCKEY }}
           TOKEN: ${{ secrets.TOKEN }}
         run: |
-          echo "任务执行失败，请检查日志"
+          timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+          status="成功"
+          if [ $? -ne 0 ]; then
+            status="失败"
+          fi
+          # Server酱通知
+          if [ -n "$SCKEY" ] && [ "$SCKEY" != "1" ]; then
+            title="✅ 任务执行成功"
+            if [ "$status" = "失败" ]; then
+              title="❌ 任务执行失败"
+            fi
+            content="**任务执行结果通知**\n\n- 执行时间：$timestamp\n- 执行状态：$status"
+            curl -X POST "https://sctapi.ftqq.com/${SCKEY}.send?title=${title}&desp=${content}"
+          fi
+          # PushPlus通知
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "1" ]; then
+            content="## 任务执行结果报告\n**时间**：$timestamp\n**结果**：$status"
+            curl -X POST -H "Content-Type: application/json" -d "{\"token\": \"$TOKEN\", \"title\": \"iKuuu任务执行通知\", \"content\": \"$content\", \"template\": \"markdown\"}" "http://www.pushplus.plus/send"
+          fi
