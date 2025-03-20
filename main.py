@@ -154,7 +154,11 @@ def main():
     login_result = client.login()
     print(login_result)
     
-    if "成功" in login_result:
+    # 无论登录是否成功，都记录登录状态
+    login_status = "success" if "成功" in login_result else "error"
+    traffic_info = "未获取到流量信息"
+    
+    if login_status == "success":
         # 签到
         checkin_result = client.checkin()
         print(checkin_result)
@@ -166,7 +170,7 @@ def main():
         # 发送通知
         send_notification("success" if "成功" in checkin_result else "error", traffic_info)
     else:
-        send_notification("error", login_result)
+        send_notification(login_status, login_result)
     
     print(f"====== 任务结束 {get_current_time()} ======\n")
 
