@@ -29,7 +29,7 @@ HEADERS = {
     "Referer": f"{BASE_URL}/auth/login"
 }
 
-# 流量解析正则表达式（根据新界面调整）
+# 流量解析正则表达式（根据截图页面结构调整）
 TRAFFIC_REGEX = re.compile(
     r'剩余流量<\/span>[\s\S]*?<span class="counter">([\d.]+)\s*([A-Z]+B)<\/span>.*?今日已用<\/span>[\s\S]*?<span class="counter">([\d.]+)\s*([A-Z]+B)<\/span>',
     re.DOTALL
