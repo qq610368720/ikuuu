@@ -29,20 +29,21 @@ HEADERS = {
     "Referer": f"{BASE_URL}/auth/login"
 }
 
-# 流量解析正则表达式
-TRAFFIC_REGEX = re.compile(r'今日已用[\s\S]*?(\d+\.?\d*)\s*([GMK]B).*?剩余流量[\s\S]*?<span class="counter">(\d+\.?\d*)</span>\s*([GMK]B)', re.DOTALL)
+# 流量解析正则表达式（根据新界面调整）
+TRAFFIC_REGEX = re.compile(
+    r'剩余流量<\/span>[\s\S]*?<span class="counter">([\d.]+)\s*([A-Z]+B)<\/span>.*?今日已用<\/span>[\s\S]*?<span class="counter">([\d.]+)\s*([A-Z]+B)<\/span>',
+    re.DOTALL
+)
 
 # ####################
 # 工具函数
 # ####################
-
 def get_current_time():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # ####################
 # 核心功能模块
 # ####################
-
 class IKuuuClient:
     def __init__(self):
         self.session = requests.Session()
@@ -82,13 +83,13 @@ class IKuuuClient:
 
     def get_traffic(self):
         try:
-            response = self.session.get(USER_INFO_URL, timeout=10)
+            response = self.session.get(USER_INFO_URL, timeout=15)
             match = TRAFFIC_REGEX.search(response.text)
             if match:
-                today = f"{match.group(1)}{match.group(2)}"
-                remain = f"{match.group(3)}{match.group(4)}"
-                return f"今日已用：{today} 剩余流量：{remain}"
-            return "流量查询失败"
+                remain = f"{match.group(1)}{match.group(2)}"
+                today_used = f"{match.group(3)}{match.group(4)}"
+                return f"今日已用：{today_used} | 剩余流量：{remain}"
+            return "流量查询失败：未匹配到流量数据"
         except RequestException as e:
             return f"❌ 流量查询失败：{str(e)}"
 
@@ -104,20 +105,21 @@ class IKuuuClient:
 # ####################
 # 通知模块
 # ####################
-
 def send_notification(status, traffic_info):
     timestamp = get_current_time()
     
     # Server酱通知
     if SCKEY and SCKEY != "1":
         try:
-            title = f"✅ 签到成功" if status == "success" else "❌ 签到失败"
+            title = "✅ 签到成功" 
+            if "失败" in status:
+                title = "❌ 签到失败"
             content = f"""
             **账户状态通知**
             
             - 邮箱账户：`{EMAIL}`
             - 执行时间：{timestamp}
-            {traffic_info}
+            - {traffic_info}
             """
             requests.post(
                 f"https://sctapi.ftqq.com/{SCKEY}.send",
@@ -131,11 +133,10 @@ def send_notification(status, traffic_info):
         try:
             content = f"""
             ## 签到状态报告
-            **账户**：{EMAIL}
-            **时间**：{timestamp}
-            **结果**：{"成功" if status == "success" else "失败"}
-            **流量信息**：
-            {traffic_info}
+            - **账户**：{EMAIL}
+            - **时间**：{timestamp}
+            - **结果**：{status}
+            - **流量信息**：{traffic_info}
             """
             requests.post(
                 "http://www.pushplus.plus/send",
@@ -152,9 +153,12 @@ def send_notification(status, traffic_info):
 # ####################
 # 主执行流程
 # ####################
-
 def main():
     print(f"\n====== 任务启动 {get_current_time()} ======")
+    
+    if not all([EMAIL, PASSWORD]):
+        print("❌ 请配置EMAIL和PASSWD环境变量")
+        exit(1)
     
     client = IKuuuClient()
     
@@ -172,14 +176,14 @@ def main():
         print(traffic_info)
         
         # 发送通知
-        send_notification("success" if "成功" in checkin_result or "已经签到" in checkin_result else "error", traffic_info)
+        status_for_notify = "成功" 
+        if "失败" in checkin_result or "异常" in checkin_result:
+            status_for_notify = "失败"
+        send_notification(status_for_notify, traffic_info)
     else:
-        send_notification("error", login_result)
+        send_notification("失败", login_result)
     
     print(f"====== 任务结束 {get_current_time()} ======\n")
 
 if __name__ == "__main__":
-    if not all([EMAIL, PASSWORD]):
-        print("❌ 请配置EMAIL和PASSWD环境变量")
-        exit(1)
     main()
