@@ -68,7 +68,15 @@ class IKuuuClient:
     def checkin(self):
         try:
             response = self.session.post(CHECKIN_URL, timeout=10)
-            return self._handle_response(response, "签到")
+            data = response.json()
+            if data.get("ret") == 1:
+                return f"✅ 签到成功：{data.get('msg')}"
+            elif "已经签到" in data.get('msg', ''):
+                return f"😎 已经签到了"
+            else:
+                return f"❌ 签到失败：{data.get('msg')}"
+        except json.JSONDecodeError:
+            return f"❌ 签到失败：接口返回数据异常"
         except RequestException as e:
             return f"❌ 签到失败：{str(e)}"
 
@@ -154,11 +162,7 @@ def main():
     login_result = client.login()
     print(login_result)
     
-    # 无论登录是否成功，都记录登录状态
-    login_status = "success" if "成功" in login_result else "error"
-    traffic_info = "未获取到流量信息"
-    
-    if login_status == "success":
+    if "成功" in login_result:
         # 签到
         checkin_result = client.checkin()
         print(checkin_result)
@@ -168,9 +172,9 @@ def main():
         print(traffic_info)
         
         # 发送通知
-        send_notification("success" if "成功" in checkin_result else "error", traffic_info)
+        send_notification("success" if "成功" in checkin_result or "已经签到" in checkin_result else "error", traffic_info)
     else:
-        send_notification(login_status, login_result)
+        send_notification("error", login_result)
     
     print(f"====== 任务结束 {get_current_time()} ======\n")
 
